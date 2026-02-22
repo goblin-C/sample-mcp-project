@@ -21,6 +21,9 @@
   "homepage": "https://github.com/goblin-C/sample-mcp-project#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
+    "mongoose": "^9.2.1",
     "zod": "^4.3.6"
   }
 }
