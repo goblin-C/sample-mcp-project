@@ -1,0 +1,26 @@
+{
+  "name": "sample-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "inspect": "npx @modelcontextprotocol/inspector node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/goblin-C/sample-mcp-project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/goblin-C/sample-mcp-project/issues"
+  },
+  "homepage": "https://github.com/goblin-C/sample-mcp-project#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^4.3.6"
+  }
+}
