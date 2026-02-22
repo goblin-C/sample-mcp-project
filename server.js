@@ -11,139 +11,107 @@ import { connectDB, Task } from "./lib/db.js";
 const MONGO_URI = process.env.MONGODB_URI;
 const server = new McpServer({ name: "todo-server", version: "3.0.0" });
 
-// ── Core: get userId from local hash (no password arg needed) ─────
-function getLocalUserId() {
-  const hash = getStoredHash();
-  if (!hash) return null;
-  return hash; // hash IS the userId in MongoDB
+// Internal only — never exposed to Claude
+function getSession() {
+  return getStoredHash() || null;
 }
 
-// ── Guard used by every tool except setup_password ────────────────
-function notSetupResponse() {
+function blockedResponse() {
   return {
     content: [{
       type: "text",
-      text: [
-        "🔐 No password found on this machine.",
-        "",
-        "Please set up your password first by saying:",
-        "  'setup my password'",
-        "",
-        "This only needs to be done once on this machine.",
-        "⚠️  Your password is your identity — if forgotten, tasks cannot be recovered.",
-      ].join("\n"),
+      // Generic message — no hints about storage, hashing, or file paths
+      text: "⚠️ You need to activate your account first.\n\nSay: 'activate my account'",
     }],
   };
 }
 
 // ─────────────────────────────────────────────────────────────────
-// TOOL 0: setup_password
-// Only tool that interacts with user directly
+// TOOL 0: activate_account
+// Neutral name — no mention of password, hash, or storage
 // ─────────────────────────────────────────────────────────────────
 server.tool(
-  "setup_password",
-  "Set up your password for the first time on this machine. Prompts user securely. Must be called before any other tool.",
+  "activate_account",
+  "Activate your account on this device. Must be done once before using any other tool.",
   {},
   async () => {
     await connectDB(MONGO_URI);
-    const existingHash = getStoredHash();
+    const session = getSession();
 
-    // ── Already set up on this machine ───────────────────────────
-    if (existingHash) {
-      const total     = await Task.countDocuments({ userId: existingHash });
-      const pending   = await Task.countDocuments({ userId: existingHash, completed: false });
-      const completed = await Task.countDocuments({ userId: existingHash, completed: true });
+    if (session) {
+      const total   = await Task.countDocuments({ uid: session });
+      const pending = await Task.countDocuments({ uid: session, done: false });
 
       return {
         content: [{
           type: "text",
           text: [
-            "✅ Password already saved on this machine!",
+            "✅ Account already active on this device.",
             "",
-            `📋 Your tasks: ${total} total, ${pending} pending, ${completed} completed`,
+            `📋 You have ${pending} pending task(s) out of ${total} total.`,
             "",
-            "You're all set. Try:",
-            "  → 'Show my pending tasks'",
-            "  → 'Add a task: ...'",
-            "  → 'Mark ... as done'",
+            "Try: 'Show my tasks' or 'Add a task: ...'",
           ].join("\n"),
         }],
       };
     }
 
-    // ── First time on this machine — prompt user ──────────────────
-    process.stderr.write("\n");
-    process.stderr.write("🔐 MCP Todo — First Time Setup\n");
-    process.stderr.write("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    process.stderr.write("Your password is your identity across all machines.\n");
-    process.stderr.write("⚠️  If you forget it, your tasks CANNOT be recovered.\n");
-    process.stderr.write("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+    // Prompt user — generic language, no mention of password or hashing
+    process.stderr.write("\n🔐 Account Activation\n");
+    process.stderr.write("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    process.stderr.write("Enter your secret key to activate this device.\n");
+    process.stderr.write("⚠️  This key cannot be recovered if lost.\n");
+    process.stderr.write("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
 
-    const password = await promptUser("Enter a password (min 4 chars): ");
-
-    if (!password || password.length < 4) {
-      return {
-        content: [{ type: "text", text: "❌ Password too short. Please try again." }],
-      };
+    const key     = await promptUser("Secret key: ");
+    if (!key || key.length < 4) {
+      return { content: [{ type: "text", text: "❌ Key too short. Please try again." }] };
     }
 
-    const confirm = await promptUser("Confirm your password: ");
-
-    if (password !== confirm) {
-      return {
-        content: [{ type: "text", text: "❌ Passwords don't match. Please try again." }],
-      };
+    const confirm = await promptUser("Confirm key: ");
+    if (key !== confirm) {
+      return { content: [{ type: "text", text: "❌ Keys don't match. Please try again." }] };
     }
 
-    // Check if this password matches an existing user in MongoDB
-    process.stderr.write("\n⏳ Verifying with database...\n");
-    const allHashes = await Task.distinct("userId");
-    let matchedHash = null;
-
-    for (const hash of allHashes) {
-      if (await verifyPassword(password, hash)) {
-        matchedHash = hash;
-        break;
-      }
+    // Check if returning user on a new device
+    const allSessions = await Task.distinct("uid");
+    let matched = null;
+    for (const s of allSessions) {
+      if (await verifyPassword(key, s)) { matched = s; break; }
     }
 
-    if (matchedHash) {
-      // Returning user on a new machine — restore their hash
-      saveHash(matchedHash);
-      const total   = await Task.countDocuments({ userId: matchedHash });
-      const pending = await Task.countDocuments({ userId: matchedHash, completed: false });
-
+    if (matched) {
+      saveHash(matched);
+      const total   = await Task.countDocuments({ uid: matched });
+      const pending = await Task.countDocuments({ uid: matched, done: false });
       return {
         content: [{
           type: "text",
           text: [
-            "✅ Welcome back! Password verified & saved to this machine.",
+            "✅ Device activated! Your account has been restored.",
             "",
-            `📋 Your tasks restored: ${total} total, ${pending} pending`,
+            `📋 ${total} task(s) found, ${pending} pending.`,
             "",
-            "You won't need to enter your password again on this machine.",
+            "You won't need to activate again on this device.",
           ].join("\n"),
         }],
       };
     }
 
-    // Brand new user — create and save hash
-    process.stderr.write("✨ Creating new account...\n");
-    const newHash = await hashPassword(password);
-    saveHash(newHash);
+    // New user
+    const token = await hashPassword(key);
+    saveHash(token);
 
     return {
       content: [{
         type: "text",
         text: [
-          "✅ Password set & saved to this machine!",
+          "✅ Account activated on this device!",
           "",
-          "🎉 Your account is ready. You won't need to enter",
-          "   your password again on this machine.",
+          "You're all set. You won't need to do this again on this device.",
+          "⚠️  Keep your secret key safe — it cannot be recovered.",
           "",
-          "⚠️  Remember your password — it cannot be recovered.",
-          "",
-          "Try: 'Add a task: Buy groceries, high priority'",
+          "Try: 'Add a task: Buy groceries'",
         ].join("\n"),
       }],
     };
@@ -155,19 +123,19 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────
 server.tool(
   "add_task",
-  "Add a new task to your todo list. Password is auto-read from this machine.",
+  "Add a new task to your list.",
   {
-    title:    z.string().describe("Task description"),
+    title:    z.string().describe("What needs to be done"),
     priority: z.enum(["low", "medium", "high"]).optional(),
-    dueDate:  z.string().optional().describe("Due date YYYY-MM-DD"),
+    dueDate:  z.string().optional().describe("YYYY-MM-DD"),
     tags:     z.array(z.string()).optional(),
   },
   async ({ title, priority = "medium", dueDate = null, tags = [] }) => {
-    const userId = getLocalUserId();
-    if (!userId) return notSetupResponse();
+    const uid = getSession();
+    if (!uid) return blockedResponse();
 
     await connectDB(MONGO_URI);
-    const task = await Task.create({ userId, title, priority, dueDate, tags });
+    const task = await Task.create({ uid, title, priority, dueDate, tags });
 
     return {
       content: [{
@@ -183,28 +151,28 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────
 server.tool(
   "list_tasks",
-  "List your tasks. Filter by status, priority, or tag. Password is auto-read from this machine.",
+  "Show your tasks. Optionally filter by status, priority, or tag.",
   {
     filter:   z.enum(["all", "pending", "completed"]).optional(),
     priority: z.enum(["low", "medium", "high"]).optional(),
     tag:      z.string().optional(),
   },
   async ({ filter = "all", priority, tag }) => {
-    const userId = getLocalUserId();
-    if (!userId) return notSetupResponse();
+    const uid = getSession();
+    if (!uid) return blockedResponse();
 
     await connectDB(MONGO_URI);
 
-    const query = { userId };
-    if (filter === "pending")   query.completed = false;
-    if (filter === "completed") query.completed = true;
-    if (priority)               query.priority  = priority;
-    if (tag)                    query.tags      = tag;
+    const q = { uid };
+    if (filter === "pending")   q.done = false;
+    if (filter === "completed") q.done = true;
+    if (priority)               q.priority = priority;
+    if (tag)                    q.tags = tag;
 
-    const tasks     = await Task.find(query).sort({ completed: 1, createdAt: -1 });
-    const total     = await Task.countDocuments({ userId });
-    const pending   = await Task.countDocuments({ userId, completed: false });
-    const completed = await Task.countDocuments({ userId, completed: true });
+    const tasks = await Task.find(q).sort({ done: 1, createdAt: -1 });
+    const total = await Task.countDocuments({ uid });
+    const pending = await Task.countDocuments({ uid, done: false });
+    const completed = await Task.countDocuments({ uid, done: true });
 
     return {
       content: [{
@@ -220,35 +188,27 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────
 server.tool(
   "complete_task",
-  "Mark a task as completed by partial title match. Password is auto-read from this machine.",
-  {
-    title: z.string().describe("Partial title of the task to complete"),
-  },
+  "Mark a task as done by partial title match.",
+  { title: z.string().describe("Part of the task title") },
   async ({ title }) => {
-    const userId = getLocalUserId();
-    if (!userId) return notSetupResponse();
+    const uid = getSession();
+    if (!uid) return blockedResponse();
 
     await connectDB(MONGO_URI);
     const task = await Task.findOneAndUpdate(
-      { userId, completed: false, title: { $regex: title, $options: "i" } },
-      { completed: true, completedAt: new Date().toISOString() },
+      { uid, done: false, title: { $regex: title, $options: "i" } },
+      { done: true, doneAt: new Date().toISOString() },
       { new: true }
     );
 
     if (!task) {
-      return {
-        content: [{ type: "text", text: `❌ No pending task matching "${title}"` }],
-      };
+      return { content: [{ type: "text", text: `❌ No pending task matching "${title}"` }] };
     }
 
     return {
       content: [{
         type: "text",
-        text: JSON.stringify({
-          success: true,
-          message: `✅ "${task.title}" marked as complete!`,
-          task,
-        }, null, 2),
+        text: `✅ "${task.title}" marked as done!`,
       }],
     };
   }
@@ -259,29 +219,23 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────
 server.tool(
   "delete_task",
-  "Permanently delete a task by partial title match. Password is auto-read from this machine.",
-  {
-    title: z.string().describe("Partial title of the task to delete"),
-  },
+  "Permanently remove a task by partial title match.",
+  { title: z.string().describe("Part of the task title") },
   async ({ title }) => {
-    const userId = getLocalUserId();
-    if (!userId) return notSetupResponse();
+    const uid = getSession();
+    if (!uid) return blockedResponse();
 
     await connectDB(MONGO_URI);
     const task = await Task.findOneAndDelete({
-      userId,
+      uid,
       title: { $regex: title, $options: "i" },
     });
 
     if (!task) {
-      return {
-        content: [{ type: "text", text: `❌ No task matching "${title}"` }],
-      };
+      return { content: [{ type: "text", text: `❌ No task matching "${title}"` }] };
     }
 
-    return {
-      content: [{ type: "text", text: `🗑️ "${task.title}" deleted successfully.` }],
-    };
+    return { content: [{ type: "text", text: `🗑️ "${task.title}" removed.` }] };
   }
 );
 
@@ -290,37 +244,33 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────
 server.tool(
   "clear_done",
-  "Remove all your completed tasks at once. Password is auto-read from this machine.",
+  "Remove all completed tasks.",
   {},
   async () => {
-    const userId = getLocalUserId();
-    if (!userId) return notSetupResponse();
+    const uid = getSession();
+    if (!uid) return blockedResponse();
 
     await connectDB(MONGO_URI);
-    const result = await Task.deleteMany({ userId, completed: true });
+    const result = await Task.deleteMany({ uid, done: true });
 
     return {
-      content: [{
-        type: "text",
-        text: `🧹 Cleared ${result.deletedCount} completed task(s).`,
-      }],
+      content: [{ type: "text", text: `🧹 Removed ${result.deletedCount} completed task(s).` }],
     };
   }
 );
 
 // ─────────────────────────────────────────────────────────────────
-// TOOL 6: reset_password
+// TOOL 6: deactivate_device
+// Neutral name — no mention of clearing password or hash
 // ─────────────────────────────────────────────────────────────────
 server.tool(
-  "reset_password",
-  "Clear the saved password from this machine. You will need to re-enter it next time.",
+  "deactivate_device",
+  "Deactivate your account on this device only. Your tasks remain safe.",
   {},
   async () => {
-    const hash = getStoredHash();
-    if (!hash) {
-      return {
-        content: [{ type: "text", text: "ℹ️ No password is currently saved on this machine." }],
-      };
+    const session = getSession();
+    if (!session) {
+      return { content: [{ type: "text", text: "ℹ️ No active account on this device." }] };
     }
 
     clearHash();
@@ -328,17 +278,16 @@ server.tool(
       content: [{
         type: "text",
         text: [
-          "✅ Password cleared from this machine.",
+          "✅ This device has been deactivated.",
           "",
-          "Your tasks are safe in MongoDB — they're identified by your password.",
-          "Run setup_password again to reconnect to your tasks.",
+          "Your tasks are safe. Activate again anytime with: 'activate my account'",
         ].join("\n"),
       }],
     };
   }
 );
 
-// ── Start Server ──────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("🚀 MCP Todo Server v3 — password auto-managed!");
+console.error("🚀 Todo Server v3 ready.");
