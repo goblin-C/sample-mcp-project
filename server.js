@@ -14,7 +14,7 @@ async function getAuthenticatedUser(password) {
   const storedHash = getStoredHash();
   if (!storedHash) return { userId: null, error: "No password set. Use setup_password first." };
   const valid = await verifyPassword(password, storedHash);
-  if (!valid) return { userId: null, error: "❌ Wrong password. Your tasks are locked." };
+  if (!valid) return { userId: null, error: "Wrong password. Your tasks are locked." };
   return { userId: getUserId(storedHash), error: null };
 }
 
@@ -27,7 +27,7 @@ server.tool(
     await connectDB(MONGO_URI);
 
     if (password.length < 4) {
-      return { content: [{ type: "text", text: "❌ Password must be at least 4 characters." }] };
+      return { content: [{ type: "text", text: "Password must be at least 4 characters." }] };
     }
 
     const storedHash = getStoredHash();
@@ -39,7 +39,7 @@ server.tool(
       return {
         content: [{
           type: "text",
-          text: `✅ Password set! Your identity is now linked to this password.\n⚠️  If you forget it, your tasks cannot be recovered.\n\nYou can now use: add_task, list_tasks, complete_task, delete_task`,
+          text: `Password set! Your identity is now linked to this password.\n  If you forget it, your tasks cannot be recovered.\n\nYou can now use: add_task, list_tasks, complete_task, delete_task`,
         }],
       };
     }
@@ -47,7 +47,7 @@ server.tool(
     // Returning user — verify password
     const valid = await verifyPassword(password, storedHash);
     if (!valid) {
-      return { content: [{ type: "text", text: "❌ Wrong password. If you forgot it, your tasks are lost by design." }] };
+      return { content: [{ type: "text", text: "Wrong password. If you forgot it, your tasks are lost by design." }] };
     }
 
     const userId = getUserId(storedHash);
@@ -55,7 +55,7 @@ server.tool(
     return {
       content: [{
         type: "text",
-        text: `✅ Welcome back! Password verified.\nYou have ${count} task(s) in your list.\n\nYou can now use: add_task, list_tasks, complete_task, delete_task`,
+        text: `Welcome back! Password verified.\nYou have ${count} task(s) in your list.\n\nYou can now use: add_task, list_tasks, complete_task, delete_task`,
       }],
     };
   }
@@ -140,14 +140,14 @@ server.tool(
       task = await Task.findOne({ userId, completed: false, title: { $regex: title, $options: "i" } });
     }
 
-    if (!task) return { content: [{ type: "text", text: "❌ Task not found." }] };
+    if (!task) return { content: [{ type: "text", text: " Task not found." }] };
 
     task.completed   = true;
     task.completedAt = new Date().toISOString();
     await task.save();
 
     return {
-      content: [{ type: "text", text: JSON.stringify({ success: true, message: `✅ "${task.title}" marked complete!`, task }, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify({ success: true, message: `"${task.title}" marked complete!`, task }, null, 2) }],
     };
   }
 );
@@ -173,8 +173,8 @@ server.tool(
       task = await Task.findOneAndDelete({ userId, title: { $regex: title, $options: "i" } });
     }
 
-    if (!task) return { content: [{ type: "text", text: "❌ Task not found." }] };
-    return { content: [{ type: "text", text: `🗑️ "${task.title}" deleted.` }] };
+    if (!task) return { content: [{ type: "text", text: " Task not found." }] };
+    return { content: [{ type: "text", text: `"${task.title}" deleted.` }] };
   }
 );
 
@@ -190,7 +190,7 @@ server.tool(
 
     const result = await Task.deleteMany({ userId, completed: true });
     return {
-      content: [{ type: "text", text: `🧹 Cleared ${result.deletedCount} completed task(s).` }],
+      content: [{ type: "text", text: `Cleared ${result.deletedCount} completed task(s).` }],
     };
   }
 );
@@ -198,4 +198,4 @@ server.tool(
 // ── Start ─────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("🚀 MCP Todo Server v2 running with MongoDB + Auth!");
+console.error("MCP Todo Server v2 running with MongoDB + Auth!");
